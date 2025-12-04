@@ -34,6 +34,16 @@
     #map {
       flex: 1;
     }
+
+    /* マーカーラベルのスタイル（やや小さめ） */
+    .marker-label {
+      font-size: 11px;
+      font-weight: 500;
+      text-shadow: -1px -1px 0 #fff,
+                   1px -1px 0 #fff,
+                  -1px  1px 0 #fff,
+                   1px  1px 0 #fff;
+    }
   </style>
 </head>
 <body>
@@ -48,66 +58,14 @@
   </div>
   <div id="map"></div>
 
-  <!-- Google Maps JavaScript API（callbackパラメータは付けません） -->
-  <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAiQ9Qj69XkxbdSkcGEngomtInbYV_ajdE"
-  ></script>
+  <!-- Google Maps JavaScript API（シンプルな読み込み） -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAiQ9Qj69XkxbdSkcGEngomtInbYV_ajdE"></script>
 
   <script>
     let map;
-    // locations: {id, name, address, lat, lng, marker, label, hidden}
+    // locations: {id, name, address, lat, lng, marker, hidden}
     let locations = [];
     let selectedIndex = -1;
-
-    // 吹き出し無しのラベル用 Overlay
-    class NameLabel extends google.maps.OverlayView {
-      constructor(position, text) {
-        super();
-        this.position = position;
-        this.text = text;
-        this.div = null;
-      }
-
-      onAdd() {
-        this.div = document.createElement("div");
-        this.div.style.position = "absolute";
-        this.div.style.background = "rgba(255,255,255,0.9)";
-        this.div.style.border = "1px solid #777";
-        this.div.style.borderRadius = "3px";
-        this.div.style.padding = "1px 3px";
-        this.div.style.fontSize = "12px";
-        this.div.style.whiteSpace = "nowrap";
-
-        this.div.textContent = this.text;
-
-        const panes = this.getPanes();
-        panes.overlayImage.appendChild(this.div);
-      }
-
-      draw() {
-        if (!this.div) return;
-        const projection = this.getProjection();
-        if (!projection) return;
-        const pos = projection.fromLatLngToDivPixel(this.position);
-        this.div.style.left = pos.x - this.div.offsetWidth / 2 + "px";
-        this.div.style.top = pos.y - 30 + "px"; // マーカーの少し上
-      }
-
-      onRemove() {
-        if (this.div && this.div.parentNode) {
-          this.div.parentNode.removeChild(this.div);
-        }
-        this.div = null;
-      }
-
-      hide() {
-        if (this.div) this.div.style.display = "none";
-      }
-
-      show() {
-        if (this.div) this.div.style.display = "block";
-      }
-    }
 
     async function initMap() {
       try {
@@ -124,7 +82,7 @@
       }
     }
 
-    // locations.json を読み込んでマーカー＋ラベルを作成
+    // locations.json を読み込んでマーカーを作成
     async function loadLocations() {
       const res = await fetch("locations.json", { cache: "no-store" });
       if (!res.ok) {
@@ -144,13 +102,14 @@
           position,
           map,
           title: loc.name,
+          // ★ Google標準のラベル機能を使用（吹き出しではない）
+          label: {
+            text: loc.name,
+            className: "marker-label"
+          }
         });
 
-        // 吹き出し無しラベル
-        const label = new NameLabel(new google.maps.LatLng(loc.lat, loc.lng), loc.name);
-        label.setMap(map);
-
-        // マーカータップ → 選択だけ（地図は動かさない／ナビもしない）
+        // マーカータップ → 「選択するだけ」（地図は動かさない／ナビもしない）
         marker.addListener("click", () => {
           selectLocation(index);
         });
@@ -164,7 +123,6 @@
           lat: loc.lat,
           lng: loc.lng,
           marker,
-          label,
           hidden: false,
         };
       });
@@ -240,9 +198,6 @@
 
       if (loc.marker) {
         loc.marker.setMap(null);
-      }
-      if (loc.label) {
-        loc.label.hide();
       }
 
       // セレクトボックスの表示に「（非表示）」を付ける
