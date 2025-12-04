@@ -34,14 +34,6 @@
     #map {
       flex: 1;
     }
-    .marker-label {
-      font-size: 0.8rem;
-      background: rgba(255, 255, 255, 0.9);
-      padding: 2px 4px;
-      border-radius: 3px;
-      border: 1px solid #888;
-      white-space: nowrap;
-    }
   </style>
 </head>
 <body>
@@ -65,9 +57,59 @@
 
   <script>
     let map;
-    // locations: {id, name, address, lat, lng, marker, labelInfo, hidden}
+    // locations: {id, name, address, lat, lng, marker, label, hidden}
     let locations = [];
     let selectedIndex = -1;
+
+    // 吹き出し無しのラベル用 Overlay
+    class NameLabel extends google.maps.OverlayView {
+      constructor(position, text) {
+        super();
+        this.position = position;
+        this.text = text;
+        this.div = null;
+      }
+
+      onAdd() {
+        this.div = document.createElement("div");
+        this.div.style.position = "absolute";
+        this.div.style.background = "rgba(255,255,255,0.9)";
+        this.div.style.border = "1px solid #777";
+        this.div.style.borderRadius = "3px";
+        this.div.style.padding = "1px 3px";
+        this.div.style.fontSize = "12px";
+        this.div.style.whiteSpace = "nowrap";
+
+        this.div.textContent = this.text;
+
+        const panes = this.getPanes();
+        panes.overlayImage.appendChild(this.div);
+      }
+
+      draw() {
+        if (!this.div) return;
+        const projection = this.getProjection();
+        if (!projection) return;
+        const pos = projection.fromLatLngToDivPixel(this.position);
+        this.div.style.left = pos.x - this.div.offsetWidth / 2 + "px";
+        this.div.style.top = pos.y - 30 + "px"; // マーカーの少し上
+      }
+
+      onRemove() {
+        if (this.div && this.div.parentNode) {
+          this.div.parentNode.removeChild(this.div);
+        }
+        this.div = null;
+      }
+
+      hide() {
+        if (this.div) this.div.style.display = "none";
+      }
+
+      show() {
+        if (this.div) this.div.style.display = "block";
+      }
+    }
 
     function initMap() {
       map = new google.maps.Map(document.getElementById("map"), {
@@ -105,27 +147,27 @@
           title: loc.name,
         });
 
-	// 吹き出し無しラベル
-	const label = new NameLabel(new google.maps.LatLng(loc.lat, loc.lng), loc.name);
-	label.setMap(map);
+        // 吹き出し無しラベル
+        const label = new NameLabel(new google.maps.LatLng(loc.lat, loc.lng), loc.name);
+        label.setMap(map);
 
-        // マーカータップ → 選択するだけ（マップもナビも動かさない）
+        // マーカータップ → 選択だけ（地図は動かさない／ナビもしない）
         marker.addListener("click", () => {
-          selectLocation(index, { from: "marker" });
+          selectLocation(index);
         });
 
         bounds.extend(position);
 
         return {
-	  id: loc.id,
-	  name: loc.name,
- 	  address: loc.address,
-	  lat: loc.lat,
-	  lng: loc.lng,
-  	  marker,
- 	  label,
-  	  hidden: false,
-	};
+          id: loc.id,
+          name: loc.name,
+          address: loc.address,
+          lat: loc.lat,
+          lng: loc.lng,
+          marker,
+          label,
+          hidden: false,
+        };
       });
 
       if (!bounds.isEmpty()) {
@@ -146,13 +188,12 @@
 
       if (locations.length > 0) {
         select.selectedIndex = 0;
-        // 初期選択はしてもマップは動かさない
-        selectLocation(0, { from: "init" });
+        selectLocation(0); // 初期選択（地図は動かさない）
       }
 
       select.addEventListener("change", () => {
         const index = select.selectedIndex;
-        selectLocation(index, { from: "select" });
+        selectLocation(index);
       });
 
       document.getElementById("navBtn").addEventListener("click", () => {
@@ -160,11 +201,6 @@
         const loc = locations[selectedIndex];
         if (loc.hidden) return; // 非表示はナビ不可
         openGoogleMapsForLocation(loc);
-
-        // 必要なら、ナビボタンを押したタイミングで地図の中心だけ合わせる場合は下記を有効化
-        // const pos = new google.maps.LatLng(loc.lat, loc.lng);
-        // map.panTo(pos);
-        // map.setZoom(14);
       });
 
       document.getElementById("hideBtn").addEventListener("click", () => {
@@ -174,10 +210,10 @@
       updateButtonsState();
     }
 
-    function selectLocation(index, _options) {
+    function selectLocation(index) {
       selectedIndex = index;
       updateButtonsState();
-      // ここではマップのパン／ズームは一切しない
+      // ここでは map.panTo などは行わない（ご要望どおり）
     }
 
     function updateButtonsState() {
@@ -191,11 +227,11 @@
       }
 
       const loc = locations[selectedIndex];
-      navBtn.disabled = loc.hidden;  // 非表示の地点はナビ不可
-      hideBtn.disabled = loc.hidden; // すでに非表示ならボタン無効
+      navBtn.disabled = loc.hidden;
+      hideBtn.disabled = loc.hidden;
     }
 
-    // 選択中の地点を「非表示」にする（このセッションだけ）
+    // 選択中の地点を「非表示」にする
     function hideSelectedLocation() {
       if (selectedIndex < 0) return;
       const loc = locations[selectedIndex];
@@ -204,14 +240,13 @@
       loc.hidden = true;
 
       if (loc.marker) {
-	loc.marker.setMap(null);
+        loc.marker.setMap(null);
       }
       if (loc.label) {
-        loc.label.hide();   // ← labelInfo ではなく label.hide()
+        loc.label.hide();
       }
 
-
-      // セレクトボックスの表示に「(非表示)」を足しておく（任意）
+      // セレクトボックスの表示に「（非表示）」を付ける
       const select = document.getElementById("locationSelect");
       const option = select.options[selectedIndex];
       if (option && !option.text.includes("（非表示）")) {
@@ -228,15 +263,6 @@
         "&destination=" + encodeURIComponent(loc.lat + "," + loc.lng) +
         "&travelmode=driving";
       window.open(url, "_blank");
-    }
-
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
     }
   </script>
 </body>
