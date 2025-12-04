@@ -48,11 +48,9 @@
   </div>
   <div id="map"></div>
 
-  <!-- Google Maps JavaScript API -->
+  <!-- Google Maps JavaScript API（callbackパラメータは付けません） -->
   <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAiQ9Qj69XkxbdSkcGEngomtInbYV_ajdE&callback=initMap"
-    async
-    defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAiQ9Qj69XkxbdSkcGEngomtInbYV_ajdE"
   ></script>
 
   <script>
@@ -111,29 +109,30 @@
       }
     }
 
-    function initMap() {
-      map = new google.maps.Map(document.getElementById("map"), {
-        center: { lat: 35.681236, lng: 139.767125 }, // 東京駅付近
-        zoom: 5,
-      });
-
-      loadLocations()
-        .then(setupUI)
-        .catch((err) => {
-          console.error(err);
-          alert("地点データの読み込みに失敗しました。");
+    async function initMap() {
+      try {
+        map = new google.maps.Map(document.getElementById("map"), {
+          center: { lat: 35.681236, lng: 139.767125 }, // 東京駅付近
+          zoom: 5,
         });
+
+        await loadLocations();
+        setupUI();
+      } catch (err) {
+        console.error(err);
+        alert("地点データの読み込みに失敗しました。");
+      }
     }
 
     // locations.json を読み込んでマーカー＋ラベルを作成
     async function loadLocations() {
       const res = await fetch("locations.json", { cache: "no-store" });
       if (!res.ok) {
-        throw new Error("locations.json の取得に失敗しました");
+        throw new Error("locations.json の取得に失敗しました (status=" + res.status + ")");
       }
       const data = await res.json();
       if (!Array.isArray(data)) {
-        throw new Error("locations.json の形式が不正です");
+        throw new Error("locations.json の形式が不正です（配列ではありません）");
       }
 
       const bounds = new google.maps.LatLngBounds();
@@ -264,6 +263,9 @@
         "&travelmode=driving";
       window.open(url, "_blank");
     }
+
+    // ページ読み込み完了後に initMap を呼ぶ
+    window.addEventListener("load", initMap);
   </script>
 </body>
 </html>
