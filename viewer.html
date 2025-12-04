@@ -21,14 +21,26 @@
       width: 100%;
       font-size: 1rem;
     }
-    #navBtn {
+    #buttons {
+      display: flex;
+      gap: 4px;
       margin-top: 6px;
-      width: 100%;
-      font-size: 1rem;
+    }
+    #buttons button {
+      flex: 1;
+      font-size: 0.95rem;
       padding: 6px;
     }
     #map {
       flex: 1;
+    }
+    .marker-label {
+      font-size: 0.8rem;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 2px 4px;
+      border-radius: 3px;
+      border: 1px solid #888;
+      white-space: nowrap;
     }
   </style>
 </head>
@@ -37,7 +49,10 @@
     <div>
       <select id="locationSelect"></select>
     </div>
-    <button id="navBtn" disabled>この地点へナビ（Googleマップ）</button>
+    <div id="buttons">
+      <button id="navBtn" disabled>この地点へナビ（Googleマップ）</button>
+      <button id="hideBtn" disabled>選択地点を非表示</button>
+    </div>
   </div>
   <div id="map"></div>
 
@@ -50,18 +65,16 @@
 
   <script>
     let map;
+    // locations: {id, name, address, lat, lng, marker, labelInfo, hidden}
     let locations = [];
-    let markers = [];
     let selectedIndex = -1;
 
     function initMap() {
-      // とりあえず日本付近
       map = new google.maps.Map(document.getElementById("map"), {
         center: { lat: 35.681236, lng: 139.767125 }, // 東京駅付近
         zoom: 5,
       });
 
-      // JSON読み込み → UIセットアップ
       loadLocations()
         .then(setupUI)
         .catch((err) => {
@@ -70,31 +83,54 @@
         });
     }
 
-    // locations.json を読み込んでマーカー作成
+    // locations.json を読み込んでマーカー＋ラベルを作成
     async function loadLocations() {
-      const res = await fetch("locations.json");
+      const res = await fetch("locations.json", { cache: "no-store" });
       if (!res.ok) {
         throw new Error("locations.json の取得に失敗しました");
       }
-      locations = await res.json();
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error("locations.json の形式が不正です");
+      }
 
       const bounds = new google.maps.LatLngBounds();
 
-      locations.forEach((loc, index) => {
+      locations = data.map((loc, index) => {
         const position = { lat: loc.lat, lng: loc.lng };
+
         const marker = new google.maps.Marker({
           position,
           map,
           title: loc.name,
         });
-        markers.push(marker);
+
+        // 名前ラベル用 InfoWindow（常時表示）
+        const labelInfo = new google.maps.InfoWindow({
+          content: '<div class="marker-label">' + escapeHtml(loc.name) + '</div>',
+          position,
+          pixelOffset: new google.maps.Size(0, -32),
+          disableAutoPan: true,
+        });
+        labelInfo.open(map);
+
+        // マーカータップ → 選択するだけ（マップもナビも動かさない）
+        marker.addListener("click", () => {
+          selectLocation(index, { from: "marker" });
+        });
+
         bounds.extend(position);
 
-        // ★ マーカークリック → 選択＋Googleマップでナビ
-        marker.addListener("click", () => {
-          selectLocation(index, true);
-          openGoogleMapsForLocation(loc);
-        });
+        return {
+          id: loc.id,
+          name: loc.name,
+          address: loc.address,
+          lat: loc.lat,
+          lng: loc.lng,
+          marker,
+          labelInfo,
+          hidden: false,
+        };
       });
 
       if (!bounds.isEmpty()) {
@@ -115,37 +151,78 @@
 
       if (locations.length > 0) {
         select.selectedIndex = 0;
-        selectLocation(0, true);
+        // 初期選択はしてもマップは動かさない
+        selectLocation(0, { from: "init" });
       }
 
       select.addEventListener("change", () => {
         const index = select.selectedIndex;
-        selectLocation(index, true);
+        selectLocation(index, { from: "select" });
       });
 
       document.getElementById("navBtn").addEventListener("click", () => {
         if (selectedIndex < 0) return;
         const loc = locations[selectedIndex];
+        if (loc.hidden) return; // 非表示はナビ不可
         openGoogleMapsForLocation(loc);
+
+        // 必要なら、ナビボタンを押したタイミングで地図の中心だけ合わせる場合は下記を有効化
+        // const pos = new google.maps.LatLng(loc.lat, loc.lng);
+        // map.panTo(pos);
+        // map.setZoom(14);
       });
 
-      updateNavButtonState();
+      document.getElementById("hideBtn").addEventListener("click", () => {
+        hideSelectedLocation();
+      });
+
+      updateButtonsState();
     }
 
-    function selectLocation(index, panTo) {
+    function selectLocation(index, _options) {
       selectedIndex = index;
-      updateNavButtonState();
-
-      const marker = markers[index];
-      if (marker && panTo) {
-        map.panTo(marker.getPosition());
-        map.setZoom(14);
-      }
+      updateButtonsState();
+      // ここではマップのパン／ズームは一切しない
     }
 
-    function updateNavButtonState() {
-      const btn = document.getElementById("navBtn");
-      btn.disabled = (selectedIndex < 0);
+    function updateButtonsState() {
+      const navBtn = document.getElementById("navBtn");
+      const hideBtn = document.getElementById("hideBtn");
+
+      if (selectedIndex < 0 || !locations[selectedIndex]) {
+        navBtn.disabled = true;
+        hideBtn.disabled = true;
+        return;
+      }
+
+      const loc = locations[selectedIndex];
+      navBtn.disabled = loc.hidden;  // 非表示の地点はナビ不可
+      hideBtn.disabled = loc.hidden; // すでに非表示ならボタン無効
+    }
+
+    // 選択中の地点を「非表示」にする（このセッションだけ）
+    function hideSelectedLocation() {
+      if (selectedIndex < 0) return;
+      const loc = locations[selectedIndex];
+      if (!loc || loc.hidden) return;
+
+      loc.hidden = true;
+
+      if (loc.marker) {
+        loc.marker.setMap(null);
+      }
+      if (loc.labelInfo) {
+        loc.labelInfo.close();
+      }
+
+      // セレクトボックスの表示に「(非表示)」を足しておく（任意）
+      const select = document.getElementById("locationSelect");
+      const option = select.options[selectedIndex];
+      if (option && !option.text.includes("（非表示）")) {
+        option.text = option.text + " （非表示）";
+      }
+
+      updateButtonsState();
     }
 
     // Googleマップアプリ（またはブラウザ）で経路表示
@@ -155,6 +232,15 @@
         "&destination=" + encodeURIComponent(loc.lat + "," + loc.lng) +
         "&travelmode=driving";
       window.open(url, "_blank");
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
   </script>
 </body>
