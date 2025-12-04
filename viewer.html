@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>現場マップ（閲覧用）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    #top {
+      padding: 8px;
+      border-bottom: 1px solid #ccc;
+      background-color: #f8f8f8;
+    }
+    #locationSelect {
+      width: 100%;
+      font-size: 1rem;
+    }
+    #navBtn {
+      margin-top: 6px;
+      width: 100%;
+      font-size: 1rem;
+      padding: 6px;
+    }
+    #map {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="top">
+    <div>
+      <select id="locationSelect"></select>
+    </div>
+    <button id="navBtn" disabled>この地点へナビ（Googleマップ）</button>
+  </div>
+  <div id="map"></div>
+
+  <!-- Google Maps JavaScript API -->
+  <script
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAiQ9Qj69XkxbdSkcGEngomtInbYV_ajdE&callback=initMap"
+    async
+    defer
+  ></script>
+
+  <script>
+    let map;
+    let locations = [];
+    let markers = [];
+    let selectedIndex = -1;
+
+    function initMap() {
+      // とりあえず日本付近
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: { lat: 35.681236, lng: 139.767125 }, // 東京駅付近
+        zoom: 5,
+      });
+
+      // JSON読み込み → UIセットアップ
+      loadLocations()
+        .then(setupUI)
+        .catch((err) => {
+          console.error(err);
+          alert("地点データの読み込みに失敗しました。");
+        });
+    }
+
+    // locations.json を読み込んでマーカー作成
+    async function loadLocations() {
+      const res = await fetch("locations.json");
+      if (!res.ok) {
+        throw new Error("locations.json の取得に失敗しました");
+      }
+      locations = await res.json();
+
+      const bounds = new google.maps.LatLngBounds();
+
+      locations.forEach((loc, index) => {
+        const position = { lat: loc.lat, lng: loc.lng };
+        const marker = new google.maps.Marker({
+          position,
+          map,
+          title: loc.name,
+        });
+        markers.push(marker);
+        bounds.extend(position);
+
+        // ★ マーカークリック → 選択＋Googleマップでナビ
+        marker.addListener("click", () => {
+          selectLocation(index, true);
+          openGoogleMapsForLocation(loc);
+        });
+      });
+
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds);
+      }
+    }
+
+    function setupUI() {
+      const select = document.getElementById("locationSelect");
+      select.innerHTML = "";
+
+      locations.forEach((loc, index) => {
+        const option = document.createElement("option");
+        option.value = index;
+        option.textContent = loc.name + " / " + loc.address;
+        select.appendChild(option);
+      });
+
+      if (locations.length > 0) {
+        select.selectedIndex = 0;
+        selectLocation(0, true);
+      }
+
+      select.addEventListener("change", () => {
+        const index = select.selectedIndex;
+        selectLocation(index, true);
+      });
+
+      document.getElementById("navBtn").addEventListener("click", () => {
+        if (selectedIndex < 0) return;
+        const loc = locations[selectedIndex];
+        openGoogleMapsForLocation(loc);
+      });
+
+      updateNavButtonState();
+    }
+
+    function selectLocation(index, panTo) {
+      selectedIndex = index;
+      updateNavButtonState();
+
+      const marker = markers[index];
+      if (marker && panTo) {
+        map.panTo(marker.getPosition());
+        map.setZoom(14);
+      }
+    }
+
+    function updateNavButtonState() {
+      const btn = document.getElementById("navBtn");
+      btn.disabled = (selectedIndex < 0);
+    }
+
+    // Googleマップアプリ（またはブラウザ）で経路表示
+    function openGoogleMapsForLocation(loc) {
+      const url =
+        "https://www.google.com/maps/dir/?api=1" +
+        "&destination=" + encodeURIComponent(loc.lat + "," + loc.lng) +
+        "&travelmode=driving";
+      window.open(url, "_blank");
+    }
+  </script>
+</body>
+</html>
