@@ -105,14 +105,9 @@
           title: loc.name,
         });
 
-        // 名前ラベル用 InfoWindow（常時表示）
-        const labelInfo = new google.maps.InfoWindow({
-          content: '<div class="marker-label">' + escapeHtml(loc.name) + '</div>',
-          position,
-          pixelOffset: new google.maps.Size(0, -32),
-          disableAutoPan: true,
-        });
-        labelInfo.open(map);
+	// 吹き出し無しラベル
+	const label = new NameLabel(new google.maps.LatLng(loc.lat, loc.lng), loc.name);
+	label.setMap(map);
 
         // マーカータップ → 選択するだけ（マップもナビも動かさない）
         marker.addListener("click", () => {
@@ -122,15 +117,15 @@
         bounds.extend(position);
 
         return {
-          id: loc.id,
-          name: loc.name,
-          address: loc.address,
-          lat: loc.lat,
-          lng: loc.lng,
-          marker,
-          labelInfo,
-          hidden: false,
-        };
+	  id: loc.id,
+	  name: loc.name,
+ 	  address: loc.address,
+	  lat: loc.lat,
+	  lng: loc.lng,
+  	  marker,
+ 	  label,
+  	  hidden: false,
+	};
       });
 
       if (!bounds.isEmpty()) {
@@ -209,11 +204,12 @@
       loc.hidden = true;
 
       if (loc.marker) {
-        loc.marker.setMap(null);
+	loc.marker.setMap(null);
       }
-      if (loc.labelInfo) {
-        loc.labelInfo.close();
+      if (loc.label) {
+        loc.label.hide();   // ← labelInfo ではなく label.hide()
       }
+
 
       // セレクトボックスの表示に「(非表示)」を足しておく（任意）
       const select = document.getElementById("locationSelect");
