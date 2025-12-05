@@ -17,9 +17,10 @@
       border-bottom: 1px solid #ccc;
       background-color: #f8f8f8;
     }
-    #locationSelect {
-      width: 100%;
-      font-size: 1rem;
+    #info {
+      font-size: 0.9rem;
+      color: #444;
+      min-height: 1.4em;
     }
     #buttons {
       display: flex;
@@ -34,32 +35,30 @@
     #map {
       flex: 1;
     }
-
-    /* マーカーラベルのスタイル（やや小さめ） */
+    /* マーカーラベルのスタイル */
     .marker-label {
-      font-size: 9px;
+      font-size: 11px;
       font-weight: 500;
       text-shadow: -1px -1px 0 #fff,
                    1px -1px 0 #fff,
                   -1px  1px 0 #fff,
                    1px  1px 0 #fff;
-      transform: translateY(20px);
+      transform: translateY(-4px); /* 上に少し持ち上げ */
     }
   </style>
 </head>
 <body>
   <div id="top">
-    <div>
-      <select id="locationSelect"></select>
-    </div>
+    <div id="info">選択中の地点：なし（マーカーをタップしてください）</div>
     <div id="buttons">
-      <button id="navBtn" disabled>この地点へナビ（Googleマップ）</button>
+      <button id="navBtn" disabled>この地点へナビ</button>
       <button id="hideBtn" disabled>選択地点を非表示</button>
+      <button id="locateBtn">現在地</button>
     </div>
   </div>
   <div id="map"></div>
 
-  <!-- Google Maps JavaScript API（シンプルな読み込み） -->
+  <!-- Google Maps JavaScript API -->
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAiQ9Qj69XkxbdSkcGEngomtInbYV_ajdE"></script>
 
   <script>
@@ -67,12 +66,14 @@
     // locations: {id, name, address, lat, lng, marker, hidden}
     let locations = [];
     let selectedIndex = -1;
+    let currentLocationMarker = null;
 
     async function initMap() {
       try {
         map = new google.maps.Map(document.getElementById("map"), {
           center: { lat: 35.681236, lng: 139.767125 }, // 東京駅付近
           zoom: 5,
+          gestureHandling: "greedy", // 指1本で地図を動かせるように
         });
 
         await loadLocations();
@@ -103,14 +104,14 @@
           position,
           map,
           title: loc.name,
-          // ★ Google標準のラベル機能を使用（吹き出しではない）
+          // マーカーのそばに名称ラベル
           label: {
             text: loc.name,
-            className: "marker-label"
-          }
+            className: "marker-label",
+          },
         });
 
-        // マーカータップ → 「選択するだけ」（地図は動かさない／ナビもしない）
+        // マーカータップ → 選択するだけ（地図は動かさない／ナビもしない）
         marker.addListener("click", () => {
           selectLocation(index);
         });
@@ -134,44 +135,48 @@
     }
 
     function setupUI() {
-      const select = document.getElementById("locationSelect");
-      select.innerHTML = "";
+      const navBtn = document.getElementById("navBtn");
+      const hideBtn = document.getElementById("hideBtn");
+      const locateBtn = document.getElementById("locateBtn");
 
-      locations.forEach((loc, index) => {
-        const option = document.createElement("option");
-        option.value = index;
-        option.textContent = loc.name + " / " + loc.address;
-        select.appendChild(option);
-      });
-
-      if (locations.length > 0) {
-        select.selectedIndex = 0;
-        selectLocation(0); // 初期選択（地図は動かさない）
-      }
-
-      select.addEventListener("change", () => {
-        const index = select.selectedIndex;
-        selectLocation(index);
-      });
-
-      document.getElementById("navBtn").addEventListener("click", () => {
+      navBtn.addEventListener("click", () => {
         if (selectedIndex < 0) return;
         const loc = locations[selectedIndex];
-        if (loc.hidden) return; // 非表示はナビ不可
+        if (loc.hidden) return;
         openGoogleMapsForLocation(loc);
       });
 
-      document.getElementById("hideBtn").addEventListener("click", () => {
+      hideBtn.addEventListener("click", () => {
         hideSelectedLocation();
       });
 
+      locateBtn.addEventListener("click", () => {
+        showCurrentLocation();
+      });
+
       updateButtonsState();
+      updateInfo();
     }
 
+    // マーカーから地点を選択
     function selectLocation(index) {
       selectedIndex = index;
+      updateInfo();
       updateButtonsState();
-      // ここでは map.panTo などは行わない（ご要望どおり）
+      // 地図のパン・ズームは行わない（マーカータップで選択のみ）
+    }
+
+    // 上部の「選択中の地点」表示
+    function updateInfo() {
+      const info = document.getElementById("info");
+      if (selectedIndex < 0 || !locations[selectedIndex]) {
+        info.textContent = "選択中の地点：なし（マーカーをタップしてください）";
+        return;
+      }
+      const loc = locations[selectedIndex];
+      const suffix = loc.hidden ? " ※この地点は非表示中" : "";
+      info.textContent =
+        "選択中の地点： " + loc.name + " ／ " + loc.address + suffix;
     }
 
     function updateButtonsState() {
@@ -189,7 +194,7 @@
       hideBtn.disabled = loc.hidden;
     }
 
-    // 選択中の地点を「非表示」にする
+    // 選択中の地点を非表示
     function hideSelectedLocation() {
       if (selectedIndex < 0) return;
       const loc = locations[selectedIndex];
@@ -201,14 +206,8 @@
         loc.marker.setMap(null);
       }
 
-      // セレクトボックスの表示に「（非表示）」を付ける
-      const select = document.getElementById("locationSelect");
-      const option = select.options[selectedIndex];
-      if (option && !option.text.includes("（非表示）")) {
-        option.text = option.text + " （非表示）";
-      }
-
       updateButtonsState();
+      updateInfo();
     }
 
     // Googleマップアプリ（またはブラウザ）で経路表示
@@ -220,22 +219,54 @@
       window.open(url, "_blank");
     }
 
+    // 現在地を表示
+    function showCurrentLocation() {
+      if (!navigator.geolocation) {
+        alert("この端末／ブラウザでは位置情報が利用できません。");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const position = { lat, lng };
+
+          if (!currentLocationMarker) {
+            currentLocationMarker = new google.maps.Marker({
+              position,
+              map,
+              title: "現在地",
+              icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 6,
+                fillColor: "#4285F4",
+                fillOpacity: 1,
+                strokeColor: "#ffffff",
+                strokeWeight: 2,
+              },
+            });
+          } else {
+            currentLocationMarker.setPosition(position);
+          }
+
+          map.panTo(position);
+          map.setZoom(14);
+        },
+        (err) => {
+          console.error(err);
+          alert("現在地を取得できませんでした：" + err.message);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        }
+      );
+    }
+
     // ページ読み込み完了後に initMap を呼ぶ
     window.addEventListener("load", initMap);
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
