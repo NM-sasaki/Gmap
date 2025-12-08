@@ -41,8 +41,8 @@
       font-weight: 500;
       text-shadow: -1px -1px 0 #fff,
                    1px -1px 0 #fff,
-                  -1px  1px 0 #fff,
-                   1px  1px 0 #fff;
+                   -1px  1px 0 #fff,
+                    1px  1px 0 #fff;
       transform: translateY(-4px); /* 上に少し持ち上げ */
     }
   </style>
@@ -52,7 +52,7 @@
     <div id="info">選択中の地点：なし（マーカーをタップしてください）</div>
     <div id="buttons">
       <button id="navBtn" disabled>この地点へナビ</button>
-      <button id="hideBtn" disabled>選択地点を非表示</button>
+      <button id="toggleBtn" disabled>選択地点を非表示</button>
       <button id="locateBtn">現在地</button>
     </div>
   </div>
@@ -67,6 +67,29 @@
     let locations = [];
     let selectedIndex = -1;
     let currentLocationMarker = null;
+
+    const HIDDEN_STORAGE_KEY = "gmap_hidden_location_ids";
+
+    function loadHiddenSet() {
+      try {
+        const text = localStorage.getItem(HIDDEN_STORAGE_KEY);
+        if (!text) return new Set();
+        const arr = JSON.parse(text);
+        if (!Array.isArray(arr)) return new Set();
+        return new Set(arr);
+      } catch (_) {
+        return new Set();
+      }
+    }
+
+    function saveHiddenSet(set) {
+      const arr = Array.from(set);
+      try {
+        localStorage.setItem(HIDDEN_STORAGE_KEY, JSON.stringify(arr));
+      } catch (_) {
+        // 保存に失敗しても致命的ではないので握りつぶす
+      }
+    }
 
     async function initMap() {
       try {
@@ -95,20 +118,23 @@
         throw new Error("locations.json の形式が不正です（配列ではありません）");
       }
 
+      const hiddenSet = loadHiddenSet();
       const bounds = new google.maps.LatLngBounds();
 
       locations = data.map((loc, index) => {
         const position = { lat: loc.lat, lng: loc.lng };
+        const isHidden = hiddenSet.has(loc.id);
 
         const marker = new google.maps.Marker({
           position,
-          map,
+          map: isHidden ? null : map, // 非表示ならマップに載せない
           title: loc.name,
-          // マーカーのそばに名称ラベル
-          label: {
-            text: loc.name,
-            className: "marker-label",
-          },
+          label: isHidden
+            ? null
+            : {
+                text: loc.name,
+                className: "marker-label",
+              },
         });
 
         // マーカータップ → 選択するだけ（地図は動かさない／ナビもしない）
@@ -116,7 +142,9 @@
           selectLocation(index);
         });
 
-        bounds.extend(position);
+        if (!isHidden) {
+          bounds.extend(position);
+        }
 
         return {
           id: loc.id,
@@ -125,7 +153,7 @@
           lat: loc.lat,
           lng: loc.lng,
           marker,
-          hidden: false,
+          hidden: isHidden,
         };
       });
 
@@ -136,7 +164,7 @@
 
     function setupUI() {
       const navBtn = document.getElementById("navBtn");
-      const hideBtn = document.getElementById("hideBtn");
+      const toggleBtn = document.getElementById("toggleBtn");
       const locateBtn = document.getElementById("locateBtn");
 
       navBtn.addEventListener("click", () => {
@@ -146,8 +174,8 @@
         openGoogleMapsForLocation(loc);
       });
 
-      hideBtn.addEventListener("click", () => {
-        hideSelectedLocation();
+      toggleBtn.addEventListener("click", () => {
+        toggleSelectedLocationVisibility();
       });
 
       locateBtn.addEventListener("click", () => {
@@ -163,7 +191,36 @@
       selectedIndex = index;
       updateInfo();
       updateButtonsState();
-      // 地図のパン・ズームは行わない（マーカータップで選択のみ）
+      // 地図のパン・ズームは行わない
+    }
+    // ----------------------------------------------------
+    // 標準マーカー(非選択時)
+    // ----------------------------------------------------
+    function setNormalMarkerAppearance(marker, name) {
+      marker.setIcon(null); // default icon
+      marker.setLabel({
+        text: name,
+        className: "marker-label",
+      });
+    }
+
+    // ----------------------------------------------------
+    // 選択時の強調マーカー
+    // ----------------------------------------------------
+    function setHighlightedMarkerAppearance(marker, name) {
+      marker.setIcon({
+        path: google.maps.SymbolPath.CIRCLE, // 円
+        scale: 10,             // ★大きさ（通常の2〜3倍）
+        fillColor: "#ff0000",  // ★赤
+        fillOpacity: 1.0,
+        strokeColor: "#ffffff",
+        strokeWeight: 2,
+      });
+
+      marker.setLabel({
+        text: name,
+        className: "marker-label",
+      });
     }
 
     // 上部の「選択中の地点」表示
@@ -181,31 +238,54 @@
 
     function updateButtonsState() {
       const navBtn = document.getElementById("navBtn");
-      const hideBtn = document.getElementById("hideBtn");
+      const toggleBtn = document.getElementById("toggleBtn");
 
       if (selectedIndex < 0 || !locations[selectedIndex]) {
         navBtn.disabled = true;
-        hideBtn.disabled = true;
+        toggleBtn.disabled = true;
+        toggleBtn.textContent = "選択地点を非表示";
         return;
       }
 
       const loc = locations[selectedIndex];
+
+      // ナビボタン：非表示中は無効
       navBtn.disabled = loc.hidden;
-      hideBtn.disabled = loc.hidden;
+
+      // トグルボタン：ラベル文言を切り替える
+      toggleBtn.disabled = false;
+      toggleBtn.textContent = loc.hidden ? "選択地点を再表示" : "選択地点を非表示";
     }
 
-    // 選択中の地点を非表示
-    function hideSelectedLocation() {
+    // 選択中の地点の表示／非表示を切り替え（状態をlocalStorageに保存）
+    function toggleSelectedLocationVisibility() {
       if (selectedIndex < 0) return;
       const loc = locations[selectedIndex];
-      if (!loc || loc.hidden) return;
+      if (!loc) return;
 
-      loc.hidden = true;
+      const hiddenSet = loadHiddenSet();
 
-      if (loc.marker) {
-        loc.marker.setMap(null);
+      if (loc.hidden) {
+        // 再表示
+        loc.hidden = false;
+        if (loc.marker) {
+          loc.marker.setMap(map);
+          loc.marker.setLabel({
+            text: loc.name,
+            className: "marker-label",
+          });
+        }
+        hiddenSet.delete(loc.id);
+      } else {
+        // 非表示
+        loc.hidden = true;
+        if (loc.marker) {
+          loc.marker.setMap(null);
+        }
+        hiddenSet.add(loc.id);
       }
 
+      saveHiddenSet(hiddenSet);
       updateButtonsState();
       updateInfo();
     }
