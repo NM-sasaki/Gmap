@@ -35,15 +35,27 @@
     #map {
       flex: 1;
     }
-    /* マーカーラベルのスタイル */
+    /* 通常ラベル */
     .marker-label {
       font-size: 11px;
       font-weight: 500;
+      color: #000;
       text-shadow: -1px -1px 0 #fff,
                    1px -1px 0 #fff,
-                   -1px  1px 0 #fff,
-                    1px  1px 0 #fff;
-      transform: translateY(-4px); /* 上に少し持ち上げ */
+                  -1px  1px 0 #fff,
+                   1px  1px 0 #fff;
+      transform: translateY(-4px);
+    }
+    /* 選択中ラベル（強調表示） */
+    .marker-label-selected {
+      font-size: 13px;
+      font-weight: 700;
+      color: #d32f2f;
+      text-shadow: -1px -1px 0 #fff,
+                   1px -1px 0 #fff,
+                  -1px  1px 0 #fff,
+                   1px  1px 0 #fff;
+      transform: translateY(-6px);
     }
   </style>
 </head>
@@ -87,8 +99,30 @@
       try {
         localStorage.setItem(HIDDEN_STORAGE_KEY, JSON.stringify(arr));
       } catch (_) {
-        // 保存に失敗しても致命的ではないので握りつぶす
+        // 保存失敗しても致命的ではないので握りつぶす
       }
+    }
+
+    // 通常マーカーの見た目
+    function setNormalMarkerAppearance(marker, name) {
+      if (!marker) return;
+      marker.setIcon(null); // デフォルトアイコン
+      marker.setLabel({
+        text: name,
+        className: "marker-label",
+      });
+      marker.setZIndex(undefined);
+    }
+
+    // 選択中マーカーの見た目（強調）
+    function setHighlightedMarkerAppearance(marker, name) {
+      if (!marker) return;
+      marker.setIcon(null); // ピン形状はそのまま
+      marker.setLabel({
+        text: "★ " + name,
+        className: "marker-label-selected",
+      });
+      marker.setZIndex(google.maps.Marker.MAX_ZINDEX + 1);
     }
 
     async function initMap() {
@@ -127,24 +161,18 @@
 
         const marker = new google.maps.Marker({
           position,
-          map: isHidden ? null : map, // 非表示ならマップに載せない
+          map: isHidden ? null : map,
           title: loc.name,
-          label: isHidden
-            ? null
-            : {
-                text: loc.name,
-                className: "marker-label",
-              },
-        });
-
-        // マーカータップ → 選択するだけ（地図は動かさない／ナビもしない）
-        marker.addListener("click", () => {
-          selectLocation(index);
         });
 
         if (!isHidden) {
+          setNormalMarkerAppearance(marker, loc.name);
           bounds.extend(position);
         }
+
+        marker.addListener("click", () => {
+          selectLocation(index);
+        });
 
         return {
           id: loc.id,
@@ -188,39 +216,25 @@
 
     // マーカーから地点を選択
     function selectLocation(index) {
+      // 以前の選択を元に戻す
+      if (selectedIndex >= 0 && locations[selectedIndex]) {
+        const prev = locations[selectedIndex];
+        if (!prev.hidden && prev.marker) {
+          setNormalMarkerAppearance(prev.marker, prev.name);
+        }
+      }
+
+      // 新しい選択
       selectedIndex = index;
+      const loc = locations[selectedIndex];
+
+      if (loc && !loc.hidden && loc.marker) {
+        setHighlightedMarkerAppearance(loc.marker, loc.name);
+      }
+
       updateInfo();
       updateButtonsState();
       // 地図のパン・ズームは行わない
-    }
-    // ----------------------------------------------------
-    // 標準マーカー(非選択時)
-    // ----------------------------------------------------
-    function setNormalMarkerAppearance(marker, name) {
-      marker.setIcon(null); // default icon
-      marker.setLabel({
-        text: name,
-        className: "marker-label",
-      });
-    }
-
-    // ----------------------------------------------------
-    // 選択時の強調マーカー
-    // ----------------------------------------------------
-    function setHighlightedMarkerAppearance(marker, name) {
-      marker.setIcon({
-        path: google.maps.SymbolPath.CIRCLE, // 円
-        scale: 10,             // ★大きさ（通常の2〜3倍）
-        fillColor: "#ff0000",  // ★赤
-        fillOpacity: 1.0,
-        strokeColor: "#ffffff",
-        strokeWeight: 2,
-      });
-
-      marker.setLabel({
-        text: name,
-        className: "marker-label",
-      });
     }
 
     // 上部の「選択中の地点」表示
@@ -249,10 +263,7 @@
 
       const loc = locations[selectedIndex];
 
-      // ナビボタン：非表示中は無効
       navBtn.disabled = loc.hidden;
-
-      // トグルボタン：ラベル文言を切り替える
       toggleBtn.disabled = false;
       toggleBtn.textContent = loc.hidden ? "選択地点を再表示" : "選択地点を非表示";
     }
@@ -270,10 +281,8 @@
         loc.hidden = false;
         if (loc.marker) {
           loc.marker.setMap(map);
-          loc.marker.setLabel({
-            text: loc.name,
-            className: "marker-label",
-          });
+          // 再表示したら選択中なので強調
+          setHighlightedMarkerAppearance(loc.marker, loc.name);
         }
         hiddenSet.delete(loc.id);
       } else {
